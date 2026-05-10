@@ -9,7 +9,7 @@ import pandas as pd
 from .data_provider import fetch_daily_bars, load_stock_universe, normalize_symbol
 from .db import get_conn, now_iso
 from .schemas import BacktestRequest, SimStateUpdate, SyncRequest
-from .strategy import build_signal, simulate_backtest
+from .strategy import build_historical_signals, build_signal, simulate_backtest
 
 
 def sync_data(req: SyncRequest) -> dict:
@@ -140,15 +140,11 @@ def get_stock_detail(symbol: str) -> dict | None:
 def run_backtest(req: BacktestRequest) -> dict:
     with get_conn() as conn:
         bars = pd.read_sql_query(
-            "SELECT * FROM daily_bars WHERE trade_date BETWEEN ? AND ? ORDER BY symbol, trade_date",
+            "SELECT * FROM daily_bars WHERE trade_date >= date(?, '-260 day') AND trade_date <= ? ORDER BY symbol, trade_date",
             conn,
             params=(req.start_date, req.end_date),
         )
-        signals = pd.read_sql_query(
-            "SELECT * FROM signals WHERE trade_date BETWEEN ? AND ? ORDER BY trade_date, score DESC",
-            conn,
-            params=(req.start_date, req.end_date),
-        )
+        signals = build_historical_signals(bars, req.start_date, req.end_date)
         summary, trades, equity = simulate_backtest(
             bars,
             signals,

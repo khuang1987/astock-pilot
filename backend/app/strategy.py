@@ -50,12 +50,7 @@ def enrich_bars(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_signal(symbol: str, df: pd.DataFrame) -> Signal | None:
-    if len(df) < 120:
-        return None
-    data = enrich_bars(df)
-    row = data.iloc[-1]
-    prev = data.iloc[-2]
+def _signal_from_rows(symbol: str, row: pd.Series, prev: pd.Series) -> Signal | None:
     if row[["ma5", "ma10", "ma20", "vol_ma20", "ret_20", "amplitude_20"]].isna().any():
         return None
     if row["close"] < 3 or row["amount"] < 80_000_000:
@@ -113,6 +108,47 @@ def build_signal(symbol: str, df: pd.DataFrame) -> Signal | None:
     )
 
 
+def build_signal(symbol: str, df: pd.DataFrame) -> Signal | None:
+    if len(df) < 120:
+        return None
+    data = enrich_bars(df)
+    return _signal_from_rows(symbol, data.iloc[-1], data.iloc[-2])
+
+
+def build_historical_signals(bars: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    rows: list[dict] = []
+    if bars.empty:
+        return pd.DataFrame(rows)
+    bars = bars.sort_values(["symbol", "trade_date"]).copy()
+    for symbol, df in bars.groupby("symbol"):
+        data = enrich_bars(df.reset_index(drop=True))
+        for idx in range(119, len(data)):
+            row = data.iloc[idx]
+            trade_date = str(row["trade_date"])
+            if trade_date < start_date or trade_date > end_date:
+                continue
+            signal = _signal_from_rows(symbol, row, data.iloc[idx - 1])
+            if not signal:
+                continue
+            rows.append(
+                {
+                    "symbol": signal.symbol,
+                    "trade_date": signal.trade_date,
+                    "score": signal.score,
+                    "trend_score": signal.trend_score,
+                    "volume_score": signal.volume_score,
+                    "risk_score": signal.risk_score,
+                    "entry_price": signal.entry_price,
+                    "stop_loss": signal.stop_loss,
+                    "take_profit_1": signal.take_profit_1,
+                    "take_profit_2": signal.take_profit_2,
+                    "position_pct": signal.position_pct,
+                    "reasons": json.dumps(signal.reasons, ensure_ascii=False),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def max_drawdown(values: list[float]) -> float:
     if not values:
         return 0.0
@@ -136,7 +172,7 @@ def simulate_backtest(
     hold_days: int,
 ) -> tuple[dict, list[dict], list[dict]]:
     if bars.empty or signals.empty:
-        return {"total_return_pct": 0, "win_rate_pct": 0, "max_drawdown_pct": 0, "trade_count": 0}, [], []
+        return {"total_return_pct": 0, "win_rate_pct": 0, "max_drawdown_pct": 0, "trade_count": 0, "avg_return_pct": 0}, [], []
 
     bars = bars.sort_values(["symbol", "trade_date"]).copy()
     by_symbol = {symbol: df.reset_index(drop=True) for symbol, df in bars.groupby("symbol")}

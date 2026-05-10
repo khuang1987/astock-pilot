@@ -146,6 +146,21 @@ input {
 .wide-panel { width: 100%; }
 .auto-box { border: 1px solid #e1e8ee; border-radius: 8px; padding: 12px; margin-bottom: 14px; background: #f8fbfc; }
 .auto-log { margin-top: 10px; color: #344452; line-height: 1.6; }
+.fold-section { border: 1px solid #e1e8ee; border-radius: 8px; background: #fbfcfd; margin-bottom: 12px; overflow: hidden; }
+.fold-head {
+  width: 100%;
+  border: 0;
+  background: #f6f9fb;
+  color: #2f3d4a;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+.fold-head > span:last-child { color: #1f6f8b; font-size: 13px; }
+.fold-body { padding: 12px; border-top: 1px solid #e6edf2; }
 .button-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .switch-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; }
 .check-line {
@@ -191,6 +206,7 @@ input {
 .strategy-match { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e3e9ee; }
 .strategy-match p { font-size: 13px; line-height: 1.6; }
 .compact-list { max-height: 180px; }
+.no-top { margin-top: 0; }
 .version-card { border-top: 1px solid #e4ebf0; padding: 14px 0; }
 .version-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .version-head span { background: #e8f4f1; color: #1d6b59; border-radius: 8px; padding: 4px 8px; font-size: 12px; }

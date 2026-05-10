@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as echarts from "echarts";
-import { Activity, BarChart3, Bell, Calculator, Database, GitBranch, LayoutDashboard, RefreshCw, ShieldAlert, Star, TrendingUp, WalletCards } from "lucide-react";
+import { Activity, BarChart3, Bell, Calculator, Database, GitBranch, LayoutDashboard, RefreshCw, Settings, ShieldAlert, Star, TrendingUp, WalletCards } from "lucide-react";
 import { api } from "./api";
 import "./styles.css";
 
@@ -77,7 +77,7 @@ function CandidateTable({ candidates, onSelect, onSimulate, onWatch }) {
         <span>股票</span><span>评分</span><span>观察价</span><span>止损</span><span>止盈</span><span>仓位</span>
       </div>
       {candidates.map((item) => (
-        <button className="row" key={item.symbol} onClick={() => onSelect(item.symbol)}>
+        <div className="row" key={item.symbol} role="button" tabIndex={0} onClick={() => onSelect(item.symbol)} onKeyDown={(e) => { if (e.key === "Enter") onSelect(item.symbol); }}>
           <span><b>{item.name}</b><small>{item.symbol}</small></span>
           <span className="score">{item.score}</span>
           <span>{item.entry_price}</span>
@@ -88,7 +88,7 @@ function CandidateTable({ candidates, onSelect, onSimulate, onWatch }) {
             <button type="button" title="模拟买入" onClick={(e) => { e.stopPropagation(); onSimulate(item); }}><WalletCards size={15} /></button>
             <button type="button" title="加入自选" onClick={(e) => { e.stopPropagation(); onWatch(item.symbol); }}><Star size={15} /></button>
           </span>
-        </button>
+        </div>
       ))}
     </div>
   );
@@ -127,29 +127,47 @@ function StockDetailPage({ symbol, onBack, onWatch }) {
   );
 }
 
+function CollapsibleSection({ title, meta, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="fold-section">
+      <button className="fold-head" onClick={() => setOpen((v) => !v)}>
+        <span><b>{title}</b>{meta && <small>{meta}</small>}</span>
+        <span>{open ? "收起" : "展开"}</span>
+      </button>
+      {open && <div className="fold-body">{children}</div>}
+    </section>
+  );
+}
+
 function BacktestPanel() {
   const today = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({ start_date: "2024-01-01", end_date: today, initial_cash: 100000, max_positions: 5, hold_days: 5, fee_rate: 0.0003 });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const run = async () => {
     setLoading(true);
+    setError("");
     try {
       setResult(await api.backtest(form));
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
   return (
-    <section className="panel">
+    <section>
       <div className="section-head"><h2>历史验证</h2><BarChart3 size={20} /></div>
-      <div className="empty compact">用历史行情模拟这套策略过去会怎么交易，主要看胜率、回撤和收益，不代表未来一定赚钱。</div>
+      <div className="empty compact">用历史行情动态生成历史信号，再模拟策略过去会怎么交易。主要看胜率、回撤和收益，不代表未来一定赚钱。</div>
       <div className="form-grid">
         {["start_date", "end_date", "initial_cash", "max_positions", "hold_days"].map((key) => (
           <label key={key}>{key}<input value={form[key]} onChange={(e) => setForm({ ...form, [key]: ["initial_cash", "max_positions", "hold_days"].includes(key) ? Number(e.target.value) : e.target.value })} /></label>
         ))}
       </div>
       <button className="primary" onClick={run} disabled={loading}>{loading ? "回测中..." : "运行回测"}</button>
+      {error && <div className="empty compact">{error}</div>}
       {result && (
         <>
           <div className="metrics">
@@ -158,6 +176,7 @@ function BacktestPanel() {
             <div><b>{result.summary.max_drawdown_pct}%</b><span>最大回撤</span></div>
             <div><b>{result.summary.trade_count}</b><span>交易数</span></div>
           </div>
+          {result.trades.length === 0 && <div className="empty compact">当前区间没有生成交易。可以先同步更多股票，或放宽策略阈值后再验证。</div>}
           <div className="trade-list">{result.trades.slice(0, 12).map((t, i) => <div key={i}>{t.symbol} {t.entry_date} {"->"} {t.exit_date} <b>{t.return_pct}%</b> {t.reason}</div>)}</div>
         </>
       )}
@@ -290,9 +309,8 @@ function SimulatorPanel({ seed, candidates = [], onSelectStock }) {
         <div><b className={totals.floatPnl >= 0 ? "profit" : "loss"}>{totals.floatPnl.toFixed(2)}</b><span>浮动盈亏</span></div>
         <div><b className={totals.realized >= 0 ? "profit" : "loss"}>{totals.realized.toFixed(2)}</b><span>已实现盈亏</span></div>
       </div>
-      {sim.latest_report && <div className="auto-log">日报提醒：{sim.latest_report.summary}</div>}
-      <div className="auto-box">
-        <h3>自动执行与日报</h3>
+      <CollapsibleSection title="自动执行与日报" meta={automation.enabled ? `已启用 · ${automation.run_time}` : "已暂停"} defaultOpen>
+        {sim.latest_report && <div className="auto-log">日报提醒：{sim.latest_report.summary}</div>}
         <div className="switch-grid">
           <label className="check-line"><input type="checkbox" checked={automation.enabled} onChange={(e) => updateAutomation({ enabled: e.target.checked })} />启用每日自动执行</label>
           <label className="check-line"><input type="checkbox" checked={automation.sync_before_run} onChange={(e) => updateAutomation({ sync_before_run: e.target.checked })} />执行前自动同步数据</label>
@@ -302,9 +320,8 @@ function SimulatorPanel({ seed, candidates = [], onSelectStock }) {
           状态：{automation.enabled ? "已启用" : "已暂停"}；每日 {automation.run_time} 后检查一次。
           上次检查：{automation.last_check_at || "暂无"}；上次结果：{automation.last_message || "暂无"}。
         </div>
-      </div>
-      <div className="auto-box">
-        <h3>自动交易规则</h3>
+      </CollapsibleSection>
+      <CollapsibleSection title="自动交易规则" meta={`评分 ${rules.minScore} · 持仓 ${rules.maxPositions} · 每日 ${rules.maxDailyTrades} 笔`} defaultOpen>
         <div className="form-grid simulator-form">
           <label>可用现金<input type="number" value={cash} onChange={(e) => updateCash(e.target.value)} /></label>
           <label>最低评分<input type="number" value={rules.minScore} onChange={(e) => updateRules({ minScore: Number(e.target.value) })} /></label>
@@ -318,17 +335,18 @@ function SimulatorPanel({ seed, candidates = [], onSelectStock }) {
         </div>
         <div className="auto-log">上次执行交易日：{sim.last_run_trade_date || "未执行"}。调仓频次：每日最多一次，买入/卖出合计不超过每日交易上限。</div>
         {autoLog && <div className="auto-log">{autoLog}</div>}
-      </div>
-      <h3>手动补录</h3>
-      <div className="form-grid simulator-form">
-        <label>代码<input value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })} /></label>
-        <label>名称<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-        <label>买入价<input type="number" value={form.buyPrice} onChange={(e) => setForm({ ...form, buyPrice: e.target.value })} /></label>
-        <label>数量<input type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></label>
-        <label>当前价<input type="number" value={form.currentPrice} onChange={(e) => setForm({ ...form, currentPrice: e.target.value })} /></label>
-      </div>
-      <button className="primary" onClick={addManual}>手动补录说明</button>
-      <div className="section-head position-head"><h3>持仓股票</h3><span>{positions.length} 只记录</span></div>
+      </CollapsibleSection>
+      <CollapsibleSection title="手动补录" meta="当前仅说明，后续接入补录保存">
+        <div className="form-grid simulator-form">
+          <label>代码<input value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })} /></label>
+          <label>名称<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+          <label>买入价<input type="number" value={form.buyPrice} onChange={(e) => setForm({ ...form, buyPrice: e.target.value })} /></label>
+          <label>数量<input type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></label>
+          <label>当前价<input type="number" value={form.currentPrice} onChange={(e) => setForm({ ...form, currentPrice: e.target.value })} /></label>
+        </div>
+        <button className="primary" onClick={addManual}>手动补录说明</button>
+      </CollapsibleSection>
+      <CollapsibleSection title="持仓股票" meta={`${positions.length} 只记录`} defaultOpen>
       {positions.length === 0 ? <div className="empty compact">暂无持仓。点“执行今日自动模拟”，系统会从今日候选里自动买入。</div> : (
         <div className="position-workbench">
           <div className="position-table">
@@ -389,13 +407,15 @@ function SimulatorPanel({ seed, candidates = [], onSelectStock }) {
           })()}
         </div>
       )}
-      <h3>全部成交记录</h3>
-      <div className="trade-list">
+      </CollapsibleSection>
+      <CollapsibleSection title="全部成交记录" meta={`${trades.length} 笔`}>
+      <div className="trade-list no-top">
         {trades.length === 0 && <div className="empty compact">暂无成交记录。</div>}
         {trades.slice(0, 30).map((t) => (
           <div key={t.id}>{t.trade_date} {t.action} {t.name} {t.symbol} {t.quantity}股 @ {t.price}，金额 {Number(t.amount).toFixed(2)}，{t.reason}</div>
         ))}
       </div>
+      </CollapsibleSection>
     </section>
   );
 }
@@ -461,7 +481,7 @@ function WatchlistPanel({ refreshKey, onSelect }) {
 function StrategyPanel() {
   const versions = useAsync(api.strategyVersions, []);
   return (
-    <section className="panel wide-panel">
+    <section>
       <div className="section-head"><h2>策略版本</h2><GitBranch size={20} /></div>
       <div className="empty">当前为日线策略；小时级数据接入后，将在这里记录每次候选规则、阈值和风控参数调整。</div>
       {versions.loading ? <div className="empty">加载中...</div> : versions.data?.map((item) => (
@@ -477,14 +497,27 @@ function StrategyPanel() {
   );
 }
 
+function ConfigPanel() {
+  return (
+    <section className="panel wide-panel">
+      <div className="section-head"><h2>配置</h2><Settings size={20} /></div>
+      <CollapsibleSection title="历史回测" meta="验证策略过去表现" defaultOpen>
+        <BacktestPanel />
+      </CollapsibleSection>
+      <CollapsibleSection title="策略版本" meta="记录参数和规则调整" defaultOpen>
+        <StrategyPanel />
+      </CollapsibleSection>
+    </section>
+  );
+}
+
 function App() {
   const tabs = [
     ["dashboard", "量化分析", LayoutDashboard],
     ["watch", "自选股", Star],
     ["sim", "模拟交易", WalletCards],
     ["calc", "仓位", Calculator],
-    ["strategy", "策略", GitBranch],
-    ["backtest", "验证", BarChart3],
+    ["config", "配置", Settings],
   ];
   const [activeTab, setActiveTab] = useState("dashboard");
   const [detailSymbol, setDetailSymbol] = useState("");
@@ -558,8 +591,7 @@ function App() {
       {activeTab === "watch" && <WatchlistPanel refreshKey={watchRefresh} onSelect={openDetail} />}
       {activeTab === "sim" && <SimulatorPanel seed={simSeed} candidates={candidates.data || []} onSelectStock={openDetail} />}
       {activeTab === "calc" && <CalculatorPanel />}
-      {activeTab === "strategy" && <StrategyPanel />}
-      {activeTab === "backtest" && <BacktestPanel />}
+      {activeTab === "config" && <ConfigPanel />}
     </main>
   );
 }
