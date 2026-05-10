@@ -22,11 +22,11 @@ if (-not (Test-Path "node_modules")) {
 }
 Pop-Location
 
-$backendCmd = "cd /d `"$backend`" && `"$venv\Scripts\python.exe`" -m uvicorn app.main:app --host 0.0.0.0 --port 3018 --reload"
-$frontendCmd = "cd /d `"$frontend`" && npm run dev -- --host 0.0.0.0 --port 3008"
+$backendCmd = "cd /d `"$backend`" && `"$venv\Scripts\python.exe`" -m uvicorn app.main:app --host 0.0.0.0 --port 3019 --reload"
+$frontendCmd = "cd /d `"$frontend`" && npm run dev -- --host 0.0.0.0 --port 3009"
 
 Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", $backendCmd) -WindowStyle Normal
 Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", $frontendCmd) -WindowStyle Normal
 
-"AStockPilot backend:  http://127.0.0.1:3018"
-"AStockPilot frontend: http://127.0.0.1:3008"
+"AStockPilot backend:  http://127.0.0.1:3019"
+"AStockPilot frontend: http://127.0.0.1:3009"
