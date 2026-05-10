@@ -20,6 +20,17 @@ function useAsync(fn, deps = []) {
   return state;
 }
 
+function useStoredNumber(key, initialValue) {
+  const [value, setValue] = useState(() => {
+    const stored = window.localStorage.getItem(key);
+    return stored ? Number(stored) : initialValue;
+  });
+  useEffect(() => {
+    window.localStorage.setItem(key, String(value));
+  }, [key, value]);
+  return [value, setValue];
+}
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -500,10 +511,31 @@ function StrategyPanel() {
   );
 }
 
-function ConfigPanel() {
+function DisplaySettings({ fontSize, onFontSizeChange }) {
+  return (
+    <section>
+      <div className="section-head"><h2>显示设置</h2><Settings size={20} /></div>
+      <div className="display-settings">
+        <label>全局字体大小
+          <input type="range" min="12" max="16" step="1" value={fontSize} onChange={(e) => onFontSizeChange(Number(e.target.value))} />
+        </label>
+        <label>字号
+          <input type="number" min="12" max="16" value={fontSize} onChange={(e) => onFontSizeChange(Number(e.target.value))} />
+        </label>
+        <button className="ghost inline" onClick={() => onFontSizeChange(14)}>恢复默认</button>
+      </div>
+      <div className="empty compact">字号越小，同一屏显示的表格和持仓内容越多。当前：{fontSize}px。</div>
+    </section>
+  );
+}
+
+function ConfigPanel({ fontSize, onFontSizeChange }) {
   return (
     <section className="panel wide-panel">
       <div className="section-head"><h2>配置</h2><Settings size={20} /></div>
+      <CollapsibleSection title="显示设置" meta={`全局 ${fontSize}px`} defaultOpen>
+        <DisplaySettings fontSize={fontSize} onFontSizeChange={onFontSizeChange} />
+      </CollapsibleSection>
       <CollapsibleSection title="历史回测" meta="验证策略过去表现" defaultOpen>
         <BacktestPanel />
       </CollapsibleSection>
@@ -528,6 +560,11 @@ function App() {
   const [simSeed, setSimSeed] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
+  const [fontSize, setFontSize] = useStoredNumber("astockpilot-font-size", 14);
+  useEffect(() => {
+    const next = Math.min(16, Math.max(12, Number(fontSize) || 14));
+    document.documentElement.style.setProperty("--app-font-size", `${next}px`);
+  }, [fontSize]);
   const candidates = useAsync(api.candidates, [refresh]);
   const [watchRefresh, setWatchRefresh] = useState(0);
   useEffect(() => {
@@ -594,7 +631,7 @@ function App() {
       {activeTab === "watch" && <WatchlistPanel refreshKey={watchRefresh} onSelect={openDetail} />}
       {activeTab === "sim" && <SimulatorPanel seed={simSeed} candidates={candidates.data || []} onSelectStock={openDetail} />}
       {activeTab === "calc" && <CalculatorPanel />}
-      {activeTab === "config" && <ConfigPanel />}
+      {activeTab === "config" && <ConfigPanel fontSize={fontSize} onFontSizeChange={setFontSize} />}
     </main>
   );
 }
