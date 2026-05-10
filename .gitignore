@@ -3,6 +3,8 @@ backend/data/
 backend/.env
 frontend/node_modules/
 frontend/dist/
+frontend/debug-*.mjs
+frontend/debug-*.png
 *.log
 __pycache__/
 *.pyc
