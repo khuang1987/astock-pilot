@@ -9,7 +9,7 @@ import pandas as pd
 from .data_provider import fetch_daily_bars, load_stock_universe, normalize_symbol
 from .db import get_conn, now_iso
 from .schemas import BacktestRequest, SimStateUpdate, SyncRequest
-from .strategy import build_historical_signals, build_signal, simulate_backtest
+from .strategy import build_historical_signals, build_latest_signals, simulate_backtest
 
 
 def sync_data(req: SyncRequest) -> dict:
@@ -26,6 +26,8 @@ def sync_data(req: SyncRequest) -> dict:
                 universe.append((symbol, found["name"] if found else symbol))
         else:
             universe = load_stock_universe(req.symbol_limit)
+        bars_by_symbol: dict[str, pd.DataFrame] = {}
+        names_by_symbol: dict[str, str] = {}
         for symbol, name in universe:
             try:
                 df = fetch_daily_bars(symbol, req.days)
@@ -57,24 +59,31 @@ def sync_data(req: SyncRequest) -> dict:
                     ],
                 )
                 total_bars += len(df)
-                signal = build_signal(symbol, df)
-                if signal:
-                    conn.execute(
-                        """
-                        INSERT OR REPLACE INTO signals(
-                            symbol, trade_date, score, trend_score, volume_score, risk_score,
-                            entry_price, stop_loss, take_profit_1, take_profit_2, position_pct, reasons, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (*signal.to_db_tuple(), now_iso()),
-                    )
-                    signal_count += 1
+                bars_by_symbol[symbol] = df
+                names_by_symbol[symbol] = name
             except Exception as exc:
                 errors.append(f"{symbol}: {exc}")
+        for signal in build_latest_signals(bars_by_symbol):
+            conn.execute(
+                "INSERT OR REPLACE INTO stocks(symbol, name, market, updated_at) VALUES (?, ?, ?, ?)",
+                (signal.symbol, names_by_symbol.get(signal.symbol, signal.symbol), "A", now_iso()),
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO signals(
+                    symbol, trade_date, score, trend_score, volume_score, risk_score,
+                    entry_price, stop_loss, take_profit_1, take_profit_2, position_pct, reasons,
+                    strategy_tags, strategy_scores, market_state, market_note, decision, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (*signal.to_db_tuple(), now_iso()),
+            )
+            signal_count += 1
     return {"synced_symbols": len(universe) - len(errors), "bars": total_bars, "signals": signal_count, "errors": errors[:20]}
 
 
 def _candidate_from_row(row) -> dict:
+    keys = row.keys()
     return {
         "symbol": row["symbol"],
         "name": row["name"],
@@ -89,6 +98,11 @@ def _candidate_from_row(row) -> dict:
         "take_profit_2": row["take_profit_2"],
         "position_pct": row["position_pct"],
         "reasons": json.loads(row["reasons"]),
+        "strategy_tags": json.loads(row["strategy_tags"]) if "strategy_tags" in keys else [],
+        "strategy_scores": json.loads(row["strategy_scores"]) if "strategy_scores" in keys else {},
+        "market_state": row["market_state"] if "market_state" in keys else "neutral",
+        "market_note": row["market_note"] if "market_note" in keys else "",
+        "decision": row["decision"] if "decision" in keys else "buy",
     }
 
 
@@ -470,9 +484,10 @@ def run_auto_simulation(force: bool = False) -> dict:
                 """,
                 (position_id, c["symbol"], c["name"], c["entry_price"], quantity, c["entry_price"], c["stop_loss"], c["take_profit_1"], latest),
             )
-            trade = _insert_trade(conn, latest, "自动买入", c["symbol"], c["name"], c["entry_price"], quantity, f"评分 {c['score']}")
+            strategy_note = "、".join(c.get("strategy_tags") or ["综合策略"])
+            trade = _insert_trade(conn, latest, "自动买入", c["symbol"], c["name"], c["entry_price"], quantity, f"{strategy_note} 评分 {c['score']}，{c.get('market_note', '')}")
             trades.append(trade)
-            logs.append(f"{c['name']} 评分 {c['score']}，买入 {quantity} 股")
+            logs.append(f"{c['name']} {strategy_note} 评分 {c['score']}，买入 {quantity} 股")
 
         conn.execute(
             "UPDATE sim_state SET cash=?, last_run_trade_date=?, updated_at=? WHERE id=1",

@@ -74,17 +74,17 @@ function CandidateTable({ candidates, onSelect, onSimulate, onWatch }) {
   return (
     <div className="table">
       <div className="thead">
-        <span>股票</span><span>评分</span><span>观察价</span><span>止损</span><span>止盈</span><span>仓位</span>
+        <span>股票</span><span>评分</span><span>策略</span><span>观察价</span><span>止损</span><span>止盈/仓位</span>
       </div>
       {candidates.map((item) => (
         <div className="row" key={item.symbol} role="button" tabIndex={0} onClick={() => onSelect(item.symbol)} onKeyDown={(e) => { if (e.key === "Enter") onSelect(item.symbol); }}>
           <span><b>{item.name}</b><small>{item.symbol}</small></span>
           <span className="score">{item.score}</span>
+          <span><b>{item.strategy_tags?.join("、") || "综合"}</b><small>{item.market_state || "neutral"}</small></span>
           <span>{item.entry_price}</span>
           <span className="risk">{item.stop_loss}</span>
-          <span>{item.take_profit_1}/{item.take_profit_2}</span>
           <span className="row-actions">
-            <b>{item.position_pct}%</b>
+            <b>{item.take_profit_1} / {item.position_pct}%</b>
             <button type="button" title="模拟买入" onClick={(e) => { e.stopPropagation(); onSimulate(item); }}><WalletCards size={15} /></button>
             <button type="button" title="加入自选" onClick={(e) => { e.stopPropagation(); onWatch(item.symbol); }}><Star size={15} /></button>
           </span>
@@ -111,6 +111,7 @@ function DetailPanel({ symbol, onWatch }) {
       {signal && (
         <div className="signal-box">
           <div><b>{signal.trade_date}</b> 信号评分 <b>{signal.score}</b></div>
+          <div className="tags">{signal.strategy_tags?.map((r) => <span key={r}>{r}</span>)}<span>{signal.market_state}</span></div>
           <div className="tags">{signal.reasons.map((r) => <span key={r}>{r}</span>)}</div>
         </div>
       )}
@@ -177,7 +178,7 @@ function BacktestPanel() {
             <div><b>{result.summary.trade_count}</b><span>交易数</span></div>
           </div>
           {result.trades.length === 0 && <div className="empty compact">当前区间没有生成交易。可以先同步更多股票，或放宽策略阈值后再验证。</div>}
-          <div className="trade-list">{result.trades.slice(0, 12).map((t, i) => <div key={i}>{t.symbol} {t.entry_date} {"->"} {t.exit_date} <b>{t.return_pct}%</b> {t.reason}</div>)}</div>
+          <div className="trade-list">{result.trades.slice(0, 12).map((t, i) => <div key={i}>{t.symbol} {t.entry_date} {"->"} {t.exit_date} <b>{t.return_pct}%</b> {t.reason} {(t.strategy_tags || []).join("、")} {t.market_state}</div>)}</div>
         </>
       )}
     </section>
@@ -392,6 +393,8 @@ function SimulatorPanel({ seed, candidates = [], onSelectStock }) {
                     <span>单票上限 {rules.maxSinglePct}%</span>
                     <span>每日上限 {rules.maxDailyTrades} 笔</span>
                     {selectedSignal ? <span>候选评分 {selectedSignal.score}</span> : <span>历史持仓，当前候选未命中</span>}
+                    {selectedSignal?.strategy_tags?.map((tag) => <span key={tag}>{tag}</span>)}
+                    {selectedSignal?.market_state && <span>{selectedSignal.market_state}</span>}
                   </div>
                   {selectedSignal?.reasons?.length ? <p>{selectedSignal.reasons.join("；")}</p> : <p>该持仓来自历史自动模拟交易，当前最新候选列表中没有对应信号。</p>}
                 </div>
@@ -483,7 +486,7 @@ function StrategyPanel() {
   return (
     <section>
       <div className="section-head"><h2>策略版本</h2><GitBranch size={20} /></div>
-      <div className="empty">当前为日线策略；小时级数据接入后，将在这里记录每次候选规则、阈值和风控参数调整。</div>
+      <div className="empty">当前为日线多策略调度：趋势突破、强势回调、放量启动只负责提案；市场环境负责降权或禁止新增买入；模拟执行层统一买卖，避免策略互相重复下单。</div>
       {versions.loading ? <div className="empty">加载中...</div> : versions.data?.map((item) => (
         <div className="version-card" key={item.id}>
           <div className="version-head"><b>{item.version}</b><span>{item.status}</span><span>{item.timeframe}</span><small>{item.created_at}</small></div>

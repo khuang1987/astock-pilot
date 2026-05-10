@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS signals (
     take_profit_2 REAL NOT NULL,
     position_pct REAL NOT NULL,
     reasons TEXT NOT NULL,
+    strategy_tags TEXT NOT NULL DEFAULT '[]',
+    strategy_scores TEXT NOT NULL DEFAULT '{}',
+    market_state TEXT NOT NULL DEFAULT 'neutral',
+    market_note TEXT NOT NULL DEFAULT '',
+    decision TEXT NOT NULL DEFAULT 'buy',
     created_at TEXT NOT NULL,
     PRIMARY KEY (symbol, trade_date)
 );
@@ -141,6 +146,11 @@ def db_path() -> Path:
 def init_db() -> None:
     with sqlite3.connect(db_path()) as conn:
         conn.executescript(SCHEMA)
+        _ensure_column(conn, "signals", "strategy_tags", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(conn, "signals", "strategy_scores", "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(conn, "signals", "market_state", "TEXT NOT NULL DEFAULT 'neutral'")
+        _ensure_column(conn, "signals", "market_note", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "signals", "decision", "TEXT NOT NULL DEFAULT 'buy'")
         count = conn.execute("SELECT COUNT(*) FROM strategy_versions").fetchone()[0]
         if count == 0:
             conn.execute(
@@ -154,6 +164,22 @@ def init_db() -> None:
                     "daily",
                     '{"min_history_days":120,"min_price":3,"min_amount":80000000,"min_score":62,"ma_short":5,"ma_mid":10,"ma_long":20,"volume_ratio_min":1.05,"volume_ratio_max":2.5,"stop_loss_pct":5,"take_profit_1_pct":6,"take_profit_2_pct":10,"position_pct_high":10,"position_pct_normal":6}',
                     "初版稳健短线策略：日线趋势、量能、波动、流动性过滤；预留小时级数据接入。",
+                    datetime.now().isoformat(timespec="seconds"),
+                ),
+            )
+        version_count = conn.execute("SELECT COUNT(*) FROM strategy_versions WHERE version = 'v1.1'").fetchone()[0]
+        if version_count == 0:
+            conn.execute(
+                """
+                INSERT INTO strategy_versions(version, status, timeframe, params_json, change_note, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "v1.1",
+                    "active",
+                    "daily",
+                    '{"strategies":["trend_breakout","strong_pullback","volume_launch"],"scheduler":"market_regime_gated","risk_off":"no_new_buy","weak_market":"only_high_score_half_position"}',
+                    "加入多策略调度器：趋势突破、强势回调、放量启动独立打分；市场环境统一裁决，策略只提案，执行层统一买卖。",
                     datetime.now().isoformat(timespec="seconds"),
                 ),
             )
@@ -204,3 +230,9 @@ def get_conn() -> Iterator[sqlite3.Connection]:
 
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

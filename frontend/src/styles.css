@@ -87,7 +87,7 @@ small { display: block; color: #6b7886; font-size: 12px; margin-top: 2px; }
 .bottom-tabs button { flex: 1 1 0; justify-content: center; padding: 10px 8px; }
 .tabs button.active { background: #1f6f8b; color: #fff; border-color: #1f6f8b; }
 .table { width: 100%; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
-.thead, .row { display: grid; grid-template-columns: 1.4fr .55fr .7fr .7fr .9fr 1fr; gap: 10px; align-items: center; min-width: 760px; }
+.thead, .row { display: grid; grid-template-columns: 1.25fr .5fr 1fr .65fr .65fr 1fr; gap: 10px; align-items: center; min-width: 840px; }
 .thead { color: #71808f; font-size: 12px; padding: 8px 10px; }
 .row {
   width: 100%;
