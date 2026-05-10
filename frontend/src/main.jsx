@@ -165,11 +165,12 @@ function BacktestPanel() {
   );
 }
 
-function SimulatorPanel({ seed, candidates = [] }) {
+function SimulatorPanel({ seed, candidates = [], onSelectStock }) {
   const state = useAsync(api.simulationState, []);
   const [sim, setSim] = useState(null);
   const [autoLog, setAutoLog] = useState("");
   const [saving, setSaving] = useState(false);
+  const [selectedPositionId, setSelectedPositionId] = useState("");
   const [form, setForm] = useState({ symbol: "", name: "", buyPrice: "", quantity: "100", currentPrice: "" });
 
   useEffect(() => {
@@ -188,6 +189,14 @@ function SimulatorPanel({ seed, candidates = [] }) {
   const automation = sim?.automation || { enabled: true, run_time: "15:30", sync_before_run: true, last_run_date: "", last_status: "", last_message: "", last_check_at: "" };
   const cash = Number(sim?.cash || 0);
   const openPositions = positions.filter((p) => p.status !== "closed");
+  useEffect(() => {
+    if (positions.length && (!selectedPositionId || !positions.some((p) => p.id === selectedPositionId))) {
+      setSelectedPositionId(positions[0].id);
+    }
+  }, [positions, selectedPositionId]);
+  const selectedPosition = positions.find((p) => p.id === selectedPositionId) || positions[0] || null;
+  const selectedTrades = selectedPosition ? trades.filter((t) => t.symbol === selectedPosition.symbol) : [];
+  const selectedSignal = selectedPosition ? candidates.find((c) => c.symbol === selectedPosition.symbol) : null;
   const totals = positions.reduce((acc, p) => {
     const cost = Number(p.buyPrice) * Number(p.quantity);
     const market = Number(p.currentPrice || p.buyPrice) * Number(p.quantity);
@@ -201,6 +210,16 @@ function SimulatorPanel({ seed, candidates = [] }) {
     return acc;
   }, { cost: 0, market: 0, floatPnl: 0, realized: 0 });
   const totalAssets = cash + totals.market;
+  const calcPosition = (p) => {
+    const buy = Number(p.buyPrice || 0);
+    const current = Number(p.currentPrice || p.buyPrice || 0);
+    const qty = Number(p.quantity || 0);
+    const market = current * qty;
+    const cost = buy * qty;
+    const pnl = p.status === "closed" && p.sellPrice ? (Number(p.sellPrice) - buy) * qty : market - cost;
+    const pnlPct = buy ? ((p.status === "closed" && p.sellPrice ? Number(p.sellPrice) : current) / buy - 1) * 100 : 0;
+    return { buy, current, qty, market, cost, pnl, pnlPct };
+  };
 
   const updateRules = async (patch) => {
     const nextRules = { ...rules, ...patch };
@@ -309,26 +328,68 @@ function SimulatorPanel({ seed, candidates = [] }) {
         <label>当前价<input type="number" value={form.currentPrice} onChange={(e) => setForm({ ...form, currentPrice: e.target.value })} /></label>
       </div>
       <button className="primary" onClick={addManual}>手动补录说明</button>
-      <h3>持仓股票</h3>
-      <div className="position-list">
-        {positions.length === 0 && <div className="empty compact">暂无持仓。点“执行今日自动模拟”，系统会从今日候选里自动买入。</div>}
-        {positions.map((p) => {
-          const pnl = (Number(p.currentPrice || p.buyPrice) - Number(p.buyPrice)) * Number(p.quantity);
-          const pnlPct = p.buyPrice ? (((Number(p.currentPrice || p.buyPrice) / Number(p.buyPrice)) - 1) * 100) : 0;
-          return (
-            <div className={`position ${p.status === "closed" ? "closed" : ""}`} key={p.id}>
-              <span><b>{p.name}</b><small>{p.symbol} · {p.createdAt} · {p.status === "closed" ? `已平仓${p.exitReason ? `/${p.exitReason}` : ""}` : "持仓中"}</small></span>
-              <label>买入<input readOnly value={p.buyPrice} /></label>
-              <label>数量<input readOnly value={p.quantity} /></label>
-              <label>当前<input readOnly value={p.currentPrice} /></label>
-              <label>卖出价<input readOnly value={p.sellPrice || ""} /></label>
-              <span className={pnl >= 0 ? "profit" : "loss"}>{pnl.toFixed(2)} / {pnlPct.toFixed(2)}%</span>
-              <span>{p.stopLoss ? `止损 ${p.stopLoss}` : ""} {p.takeProfit ? `止盈 ${p.takeProfit}` : ""}</span>
+      <div className="section-head position-head"><h3>持仓股票</h3><span>{positions.length} 只记录</span></div>
+      {positions.length === 0 ? <div className="empty compact">暂无持仓。点“执行今日自动模拟”，系统会从今日候选里自动买入。</div> : (
+        <div className="position-workbench">
+          <div className="position-table">
+            <div className="position-thead">
+              <span>股票</span><span>状态</span><span>数量</span><span>成本/现价</span><span>市值</span><span>盈亏</span><span>风控</span>
             </div>
-          );
-        })}
-      </div>
-      <h3>成交记录</h3>
+            {positions.map((p) => {
+              const stat = calcPosition(p);
+              return (
+                <button className={`position-row ${p.id === selectedPosition?.id ? "active" : ""} ${p.status === "closed" ? "closed" : ""}`} key={p.id} onClick={() => setSelectedPositionId(p.id)}>
+                  <span><b>{p.name}</b><small>{p.symbol} · {p.createdAt}</small></span>
+                  <span>{p.status === "closed" ? `已平仓${p.exitReason ? `/${p.exitReason}` : ""}` : "持仓中"}</span>
+                  <span>{p.quantity}股</span>
+                  <span>{Number(p.buyPrice).toFixed(2)} / {Number(p.currentPrice || p.buyPrice).toFixed(2)}</span>
+                  <span>{stat.market.toFixed(2)}</span>
+                  <span className={stat.pnl >= 0 ? "profit" : "loss"}>{stat.pnl.toFixed(2)}<small>{stat.pnlPct.toFixed(2)}%</small></span>
+                  <span>损 {p.stopLoss || "-"} / 盈 {p.takeProfit || "-"}</span>
+                </button>
+              );
+            })}
+          </div>
+          {selectedPosition && (() => {
+            const stat = calcPosition(selectedPosition);
+            const buyTrade = selectedTrades.find((t) => t.action.includes("买入"));
+            const sellTrade = selectedTrades.find((t) => t.action.includes("卖出"));
+            return (
+              <div className="position-detail">
+                <div className="section-head">
+                  <h3>{selectedPosition.name} <small>{selectedPosition.symbol}</small></h3>
+                  <button className="ghost inline" onClick={() => onSelectStock?.(selectedPosition.symbol)}>查看K线</button>
+                </div>
+                <div className="detail-grid">
+                  <div><span>买入点</span><b>{Number(selectedPosition.buyPrice).toFixed(2)}</b><small>{buyTrade?.reason || "自动策略买入"}</small></div>
+                  <div><span>当前/卖出点</span><b>{selectedPosition.status === "closed" && selectedPosition.sellPrice ? Number(selectedPosition.sellPrice).toFixed(2) : Number(selectedPosition.currentPrice || selectedPosition.buyPrice).toFixed(2)}</b><small>{sellTrade?.reason || "未触发卖出"}</small></div>
+                  <div><span>止损/止盈</span><b>{selectedPosition.stopLoss} / {selectedPosition.takeProfit}</b><small>触发后自动模拟卖出</small></div>
+                  <div><span>盈亏</span><b className={stat.pnl >= 0 ? "profit" : "loss"}>{stat.pnl.toFixed(2)}</b><small>{stat.pnlPct.toFixed(2)}%</small></div>
+                </div>
+                <div className="strategy-match">
+                  <b>匹配交易策略</b>
+                  <div className="tags">
+                    <span>最低评分 {rules.minScore}</span>
+                    <span>最大持仓 {rules.maxPositions}</span>
+                    <span>单票上限 {rules.maxSinglePct}%</span>
+                    <span>每日上限 {rules.maxDailyTrades} 笔</span>
+                    {selectedSignal ? <span>候选评分 {selectedSignal.score}</span> : <span>历史持仓，当前候选未命中</span>}
+                  </div>
+                  {selectedSignal?.reasons?.length ? <p>{selectedSignal.reasons.join("；")}</p> : <p>该持仓来自历史自动模拟交易，当前最新候选列表中没有对应信号。</p>}
+                </div>
+                <h3>本股交易历史</h3>
+                <div className="trade-list compact-list">
+                  {selectedTrades.length === 0 && <div className="empty compact">暂无本股成交记录。</div>}
+                  {selectedTrades.map((t) => (
+                    <div key={t.id}>{t.trade_date} {t.action} {t.quantity}股 @ {t.price}，金额 {Number(t.amount).toFixed(2)}，{t.reason}</div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+      <h3>全部成交记录</h3>
       <div className="trade-list">
         {trades.length === 0 && <div className="empty compact">暂无成交记录。</div>}
         {trades.slice(0, 30).map((t) => (
@@ -495,7 +556,7 @@ function App() {
       )}
       {activeTab === "detail" && <StockDetailPage symbol={detailSymbol} onBack={() => setActiveTab("dashboard")} onWatch={addWatch} />}
       {activeTab === "watch" && <WatchlistPanel refreshKey={watchRefresh} onSelect={openDetail} />}
-      {activeTab === "sim" && <SimulatorPanel seed={simSeed} candidates={candidates.data || []} />}
+      {activeTab === "sim" && <SimulatorPanel seed={simSeed} candidates={candidates.data || []} onSelectStock={openDetail} />}
       {activeTab === "calc" && <CalculatorPanel />}
       {activeTab === "strategy" && <StrategyPanel />}
       {activeTab === "backtest" && <BacktestPanel />}
