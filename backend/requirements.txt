@@ -1,0 +1,8 @@
+fastapi==0.124.4
+uvicorn[standard]==0.38.0
+pydantic==2.12.5
+pydantic-settings==2.12.0
+python-dotenv==1.2.1
+pandas==2.3.3
+numpy==2.3.5
+akshare==1.17.95
