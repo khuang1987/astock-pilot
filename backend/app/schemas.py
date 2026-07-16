@@ -71,10 +71,41 @@ class WatchItem(BaseModel):
 
 
 class SimRules(BaseModel):
-    minScore: float = Field(default=75, ge=0, le=100)
-    maxPositions: int = Field(default=5, ge=1, le=50)
-    maxSinglePct: float = Field(default=10, ge=1, le=100)
+    minScore: float = Field(default=82, ge=0, le=100)
+    maxPositions: int = Field(default=4, ge=1, le=50)
+    maxSinglePct: float = Field(default=8, ge=1, le=100)
     maxDailyTrades: int = Field(default=5, ge=1, le=100)
+    maxDailyBuys: int = Field(default=1, ge=0, le=50)
+    maxDailySells: int = Field(default=4, ge=0, le=50)
+    sellPriority: bool = True
+    dynamicBuyEnabled: bool = True
+    weakMaxDailyBuys: int = Field(default=1, ge=0, le=10)
+    weakMaxDailyBuyPct: float = Field(default=5, ge=0, le=100)
+    rangeMaxDailyBuys: int = Field(default=1, ge=0, le=10)
+    rangeMaxDailyBuyPct: float = Field(default=8, ge=0, le=100)
+    strongMaxDailyBuys: int = Field(default=2, ge=0, le=10)
+    strongMaxDailyBuyPct: float = Field(default=15, ge=0, le=100)
+    buyPriceTolerancePct: float = Field(default=0.8, ge=0, le=20)
+    commissionRate: float = Field(default=0.0003, ge=0, le=0.01)
+    minCommission: float = Field(default=5, ge=0, le=100)
+    stampTaxRate: float = Field(default=0.0005, ge=0, le=0.01)
+    transferFeeRate: float = Field(default=0.00001, ge=0, le=0.01)
+    slippagePct: float = Field(default=0.15, ge=0, le=5)
+    rebalanceEnabled: bool = True
+    rebalanceMinNewScore: float = Field(default=88, ge=0, le=100)
+    rebalanceMinScoreGap: float = Field(default=8, ge=0, le=100)
+    maxDailyRebalances: int = Field(default=1, ge=0, le=20)
+    weakHoldDays: int = Field(default=5, ge=1, le=60)
+    weakReturnPct: float = Field(default=-2.5, ge=-50, le=50)
+    weakScoreExit: float = Field(default=78, ge=0, le=100)
+    addPositionEnabled: bool = False
+    addMinProfitPct: float = Field(default=4, ge=0, le=100)
+    addMinScore: float = Field(default=88, ge=0, le=100)
+    maxAddsPerSymbol: int = Field(default=1, ge=0, le=10)
+    addPositionPct: float = Field(default=3, ge=0, le=50)
+    takeProfitSellPct: float = Field(default=50, ge=1, le=100)
+    trailingStopPct: float = Field(default=4, ge=0.5, le=30)
+    minRemainLot: int = Field(default=100, ge=0, le=10000)
 
 
 class SimStateUpdate(BaseModel):
@@ -85,5 +116,20 @@ class SimStateUpdate(BaseModel):
 
 class AutomationUpdate(BaseModel):
     enabled: bool | None = None
+    mode: str | None = Field(default=None, pattern=r"^(manual|assist|managed)$")
     run_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    execution_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    planning_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     sync_before_run: bool | None = None
+
+
+class AISettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    provider: str | None = Field(default=None, pattern=r"^(openai|deepseek)$")
+    model: str | None = Field(default=None, min_length=1, max_length=80)
+    base_url: str | None = Field(default=None, min_length=8, max_length=200)
+    api_key: str | None = Field(default=None, max_length=300)
+    daily_review_enabled: bool | None = None
+    plan_review_enabled: bool | None = None
+    stock_review_enabled: bool | None = None
+    block_trade_enabled: bool | None = None

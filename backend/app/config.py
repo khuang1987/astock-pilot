@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     default_symbol_limit: int = 80
     auto_sim_enabled: bool = True
     auto_sim_run_time: str = "15:30"
+    quote_refresh_enabled: bool = True
+    quote_refresh_minutes: int = 60
+    qmt_enabled: bool = False
+    qmt_user_data_path: str = ""
+    qmt_account_id: str = ""
+    qmt_account_type: str = "STOCK"
+    qmt_live_order_enabled: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
