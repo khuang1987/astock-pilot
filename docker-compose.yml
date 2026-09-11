@@ -1,0 +1,15 @@
+services:
+  astockpilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: astockpilot
+    restart: unless-stopped
+    environment:
+      APP_NAME: AStockPilot
+      DATABASE_PATH: /app/backend/data/astockpilot.db
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "3009:3009"
+    volumes:
+      - ./backend/data:/app/backend/data

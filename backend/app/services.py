@@ -915,6 +915,12 @@ def _normalize_rules(rules: dict | None) -> dict:
         "maxDailySells": 4,
         "sellPriority": True,
         "dynamicBuyEnabled": True,
+        "allowWeakMarketBuy": False,
+        "weakMinScore": 88,
+        "rangeMinScore": 85,
+        "strongMinScore": 82,
+        "maxDailyLossPct": 1.5,
+        "maxLossStreak": 3,
         "weakMaxDailyBuys": 1,
         "weakMaxDailyBuyPct": 5,
         "rangeMaxDailyBuys": 1,
@@ -1003,6 +1009,19 @@ def _dynamic_buy_profile(rules: dict, market_state: str | None) -> dict:
     }
 
 
+def _buy_score_floor(rules: dict, market_state: str | None) -> float:
+    """Return the state-aware entry score floor used by every buy path."""
+    state = str(market_state or "neutral").lower()
+    base = float(rules.get("minScore", 82) or 82)
+    if state == "weak":
+        if not rules.get("allowWeakMarketBuy", False):
+            return float("inf")
+        return max(base, float(rules.get("weakMinScore", 88) or 88))
+    if state == "strong":
+        return max(base, float(rules.get("strongMinScore", 82) or 82))
+    return max(base, float(rules.get("rangeMinScore", 85) or 85))
+
+
 def _is_buy_trade_action(action: str) -> bool:
     text = str(action or "")
     return "买入" in text or "追加" in text
@@ -1017,6 +1036,72 @@ def _daily_buy_usage(conn, trade_date: str, initial_cash: float) -> dict:
         "amount": amount,
         "pct": round(amount / initial_cash * 100, 4) if initial_cash else 0.0,
     }
+
+
+def _risk_snapshot(conn, state: dict) -> dict:
+    """Summarize realized risk without changing account or trade records."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    daily_pnl: dict[str, float] = {}
+    closed_rows = conn.execute(
+        """
+        SELECT closed_at, (exit_price - buy_price) * quantity AS gross_pnl
+        FROM sim_positions
+        WHERE status='closed' AND closed_at <> ''
+        ORDER BY closed_at DESC
+        """
+    ).fetchall()
+    for row in closed_rows:
+        day = str(row["closed_at"] or "")[:10]
+        if day:
+            daily_pnl[day] = daily_pnl.get(day, 0.0) + float(row["gross_pnl"] or 0)
+    sell_cost_rows = conn.execute(
+        "SELECT trade_date, fee, tax FROM sim_trades WHERE action LIKE '%卖出%'"
+    ).fetchall()
+    for row in sell_cost_rows:
+        day = str(row["trade_date"] or "")[:10]
+        if day:
+            daily_pnl[day] = daily_pnl.get(day, 0.0) - float(row["fee"] or 0) - float(row["tax"] or 0)
+
+    ordered_days = sorted(daily_pnl, reverse=True)
+    loss_streak = 0
+    for day in ordered_days:
+        if daily_pnl[day] < 0:
+            loss_streak += 1
+        else:
+            break
+    initial_cash = float(state.get("initial_cash") or 0)
+    rules = state.get("rules") or {}
+    max_daily_loss_pct = float(rules.get("maxDailyLossPct", 1.5) or 0)
+    max_daily_loss = initial_cash * max_daily_loss_pct / 100 if initial_cash else 0.0
+    today_pnl = float(daily_pnl.get(today, 0.0))
+    daily_loss_guard = bool(max_daily_loss and today_pnl <= -max_daily_loss)
+    streak_guard = bool(int(rules.get("maxLossStreak", 3) or 0) and loss_streak >= int(rules.get("maxLossStreak", 3) or 0))
+    guard_active = daily_loss_guard or streak_guard
+    if daily_loss_guard:
+        guard_reason = f"今日已实现亏损 {abs(today_pnl):.2f}，达到 {max_daily_loss_pct:.1f}% 日亏损上限"
+    elif streak_guard:
+        guard_reason = f"最近连续 {loss_streak} 个亏损交易日，暂停新增买入"
+    else:
+        guard_reason = "风险阈值正常"
+    recent_days = ordered_days[:20]
+    recent_net = sum(daily_pnl[day] for day in recent_days)
+    return {
+        "today_pnl": round(today_pnl, 2),
+        "recent_pnl": round(recent_net, 2),
+        "loss_streak": loss_streak,
+        "max_daily_loss_pct": round(max_daily_loss_pct, 2),
+        "max_daily_loss": round(max_daily_loss, 2),
+        "max_loss_streak": int(rules.get("maxLossStreak", 3) or 0),
+        "guard_active": guard_active,
+        "guard_reason": guard_reason,
+        "guard_label": "暂停新增买入" if guard_active else "正常观察",
+        "last_loss_date": next((day for day in ordered_days if daily_pnl[day] < 0), ""),
+    }
+
+
+def _buy_risk_block(conn, state: dict) -> str:
+    snapshot = _risk_snapshot(conn, state)
+    return snapshot["guard_reason"] if snapshot["guard_active"] else ""
 
 
 def _max_quantity_for_buy_budget(price: float, remaining_budget: float, rules: dict) -> int:
@@ -2123,6 +2208,7 @@ def get_simulation_state() -> dict:
             **state,
             "positions": positions,
             "account_summary": _account_summary(state, positions),
+            "risk_snapshot": _risk_snapshot(conn, state),
             "trades": trades,
             "latest_report": _daily_report_dict(report),
             "latest_ai_report": _latest_ai_daily_report(conn),
@@ -2915,12 +3001,15 @@ def _generate_trade_plan_locked(conn) -> dict:
                 ))
 
         open_symbols = {row["symbol"] for row in conn.execute("SELECT symbol FROM sim_positions WHERE status='open'").fetchall()}
+        market_state = _market_state_for_trade_date(conn, latest)
+        buy_profile = _dynamic_buy_profile(rules, market_state)
+        buy_floor = _buy_score_floor(rules, market_state)
+        buy_block = _buy_risk_block(conn, state)
         candidates = [
             c for c in latest_candidates
-            if c["score"] >= float(rules["minScore"]) and c["symbol"] not in open_symbols
+            if c["score"] >= buy_floor and c["symbol"] not in open_symbols and not buy_block
         ]
         effective_open_count = len(open_symbols) - len(planned_exit_symbols)
-        buy_profile = _dynamic_buy_profile(rules, _market_state_for_trade_date(conn, latest))
         buy_slots = max(0, int(rules["maxPositions"]) - effective_open_count)
         buy_slots = min(buy_slots, int(buy_profile["max_buys"]))
         daily_buy_budget = float(state["initial_cash"]) * float(buy_profile["max_buy_pct"]) / 100
@@ -2949,7 +3038,7 @@ def _generate_trade_plan_locked(conn) -> dict:
                 stop_loss=float(c["stop_loss"]),
                 take_profit=float(c["take_profit_1"]),
                 quantity=quantity,
-                reason=f"{'、'.join(c.get('strategy_tags') or ['综合策略'])} 评分 {c['score']}。{buy_profile['label']}动态额度：最多 {buy_profile['max_buys']} 笔 / {buy_profile['max_buy_pct']}%。次日价格接近观察价且未明显高开时模拟买入。",
+                reason=f"{'、'.join(c.get('strategy_tags') or ['综合策略'])} 评分 {c['score']}，达到{buy_profile['label']}买入门槛 {buy_floor:g} 分。动态额度：最多 {buy_profile['max_buys']} 笔 / {buy_profile['max_buy_pct']}%。次日价格接近观察价且未明显高开时模拟买入。",
             ))
         if rules.get("rebalanceEnabled", True) and buy_slots <= 0 and candidates:
             weak_positions = _rank_rebalance_candidates(open_positions, latest_closes, latest_signal_by_symbol, latest, rules)
@@ -3016,7 +3105,7 @@ def _generate_trade_plan_locked(conn) -> dict:
                 if planned_buy_count >= int(buy_profile["max_buys"]):
                     break
                 signal = latest_signal_by_symbol.get(p["symbol"])
-                if not signal or float(signal["score"]) < float(rules.get("addMinScore", 88)):
+                if not signal or float(signal["score"]) < max(float(rules.get("addMinScore", 88)), buy_floor):
                     continue
                 close = latest_closes.get(p["symbol"])
                 current_price = float(close["close"] if close else p["current_price"])
@@ -3048,6 +3137,12 @@ def _generate_trade_plan_locked(conn) -> dict:
                 ))
                 add_count += 1
         logs = [f"生成 {len(plans)} 条次日交易计划，计划交易日 {plan_date}"]
+        if buy_block:
+            logs.append(f"新增买入已暂停：{buy_block}；止损、止盈和弱势退出仍正常执行")
+        elif latest_candidates and buy_floor == float("inf"):
+            logs.append("当前为弱市，默认暂停新增买入；可在策略规则中开启弱市高分试探")
+        elif latest_candidates and not candidates and buy_slots > 0:
+            logs.append(f"当前{buy_profile['label']}新增买入门槛为 {buy_floor:g} 分，未达到门槛的候选不进入计划")
         retired_count = _retire_stale_trade_plans(conn, plan_date, latest, plans)
         if retired_count:
             logs.append(f"作废 {retired_count} 条不再符合最新评分的旧计划")
@@ -3134,6 +3229,7 @@ def _execute_trade_plans_replay_locked(conn, force: bool = False, plan_id: str |
         state = _get_sim_state(conn)
         rules = state["rules"]
         cash = float(state["cash"])
+        buy_block = _buy_risk_block(conn, state)
         buy_count = 0
         sell_count = 0
         buy_usage_by_date: dict[str, dict] = {}
@@ -3223,6 +3319,10 @@ def _execute_trade_plans_replay_locked(conn, force: bool = False, plan_id: str |
                 if plan["plan_type"] == "rebalance_sell":
                     rebalance_sell_count += 1
             elif plan["plan_type"] in ("next_buy", "rebalance_buy", "add_buy"):
+                if buy_block:
+                    if not any("新增买入已暂停" in item for item in logs):
+                        logs.append(f"新增买入已暂停：{buy_block}；当前买入计划保留，卖出风控继续执行")
+                    continue
                 if plan["plan_type"] == "rebalance_buy" and rebalance_buy_count >= int(rules.get("maxDailyRebalances", 1)):
                     logs.append("调仓买入数量达到今日上限，剩余调仓买入计划保留")
                     continue
@@ -3308,6 +3408,7 @@ def _execute_trade_plans_live_locked(conn, quotes: dict[str, dict], quote_error:
         _expire_pending_trade_plans(conn, today)
         state = _get_sim_state(conn)
         rules = state["rules"]
+        buy_block = _buy_risk_block(conn, state)
         logs: list[str] = []
         trades: list[dict] = []
         if not phase["is_trade_day"]:
@@ -3365,7 +3466,7 @@ def _execute_trade_plans_live_locked(conn, quotes: dict[str, dict], quote_error:
             ai_gate = _ai_execution_gate(conn, plan)
             _record_plan_decision_audit(conn, plan, ai_gate["decision"], data_guard)
             if not ai_gate["allow"]:
-                if not _is_buy_plan(plan["plan_type"]):
+                if not _is_buy_plan(plan["plan_type"]) or ai_gate["decision"].get("status") in ("rejected", "high_risk", "blocked"):
                     conn.execute("UPDATE trade_plans SET status='skipped', reason=? WHERE id=?", (ai_gate["reason"], plan["id"]))
                 logs.append(f"{plan['name']} {ai_gate['reason']}")
                 continue
@@ -3418,6 +3519,10 @@ def _execute_trade_plans_live_locked(conn, quotes: dict[str, dict], quote_error:
                 if plan["plan_type"] == "rebalance_sell":
                     rebalance_sell_count += 1
             elif plan["plan_type"] in ("next_buy", "rebalance_buy", "add_buy"):
+                if buy_block:
+                    if not any("新增买入已暂停" in item for item in logs):
+                        logs.append(f"新增买入已暂停：{buy_block}；当前买入计划保留，卖出风控继续执行")
+                    continue
                 if plan["plan_type"] == "rebalance_buy" and rebalance_buy_count >= int(rules.get("maxDailyRebalances", 1)):
                     logs.append("调仓买入数量达到今日上限，剩余调仓买入计划保留")
                     continue

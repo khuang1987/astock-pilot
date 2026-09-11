@@ -509,6 +509,7 @@ function HomeDashboard({ candidates, loading, error, topDate, syncMsg, dataStatu
   const sim = useAsync(api.simulationState, []);
   const reports = useAsync(api.dailyReports, []);
   const account = sim.data?.account_summary || {};
+  const risk = sim.data?.risk_snapshot || {};
   const latestReport = sim.data?.latest_report || {};
   const positions = sim.data?.positions || [];
   const plans = sim.data?.plans || [];
@@ -595,6 +596,15 @@ function HomeDashboard({ candidates, loading, error, topDate, syncMsg, dataStatu
             <div><span>盈亏总结</span><b className={Number(account.float_pnl || 0) >= 0 ? "profit" : "loss"}>{Number(account.float_pnl || 0).toFixed(2)}</b><small>已实现 {Number(account.realized_pnl || 0).toFixed(2)}</small></div>
             <div><span>市场宽度</span><b>{hasMarketSnapshot ? `${upCount}/${breadthTotal}` : "--"}</b><small>平均涨跌 {hasMarketSnapshot ? `${avgPctChg.toFixed(2)}%` : "--"}</small></div>
             <div><span>执行概况</span><b>{todayTradeCount}</b><small>持仓 {openPositionCount} 只 · 候选 {list.length} 只</small></div>
+          </div>
+          <div className={`risk-health-card ${risk.guard_active ? "guarded" : Number(risk.recent_pnl || 0) < 0 ? "caution" : "stable"}`}>
+            <div className="risk-health-heading"><span>策略风控</span><b>{risk.guard_label || "正常观察"}</b></div>
+            <p>{risk.guard_reason || "风险阈值正常，继续观察买入质量与持仓退出。"}</p>
+            <div className="risk-health-meta">
+              <span>近20日 {Number(risk.recent_pnl || 0).toFixed(2)}</span>
+              <span>连续亏损日 {Number(risk.loss_streak || 0)} / {Number(risk.max_loss_streak || 3)}</span>
+              <span>日亏损上限 {Number(risk.max_daily_loss_pct || 1.5).toFixed(1)}%</span>
+            </div>
           </div>
         </div>
       </section>
@@ -1457,9 +1467,12 @@ function SimulatorPanel({ onSync, onDailyWorkflow, syncing = false, workflowing 
               <div><span>买入门槛</span><b>{rules.minScore} 分</b><small>候选评分低于门槛不会买</small></div>
               <div><span>单票预算</span><b>{rules.maxSinglePct}%</b><small>按初始资金计算，再取整到100股</small></div>
               <div><span>动态买入</span><b>{rules.dynamicBuyEnabled !== false ? "开启" : "关闭"}</b><small>按市场强弱控制买入次数和新增仓位</small></div>
-              <div><span>弱市买入</span><b>{rules.weakMaxDailyBuys ?? 1} 笔 / {rules.weakMaxDailyBuyPct ?? 5}%</b><small>只允许小仓位试探</small></div>
+              <div><span>弱市新增</span><b>{rules.allowWeakMarketBuy ? `${rules.weakMinScore ?? 88} 分起` : "默认暂停"}</b><small>避免在弱势环境反复接飞刀</small></div>
+              <div><span>弱市买入</span><b>{rules.weakMaxDailyBuys ?? 1} 笔 / {rules.weakMaxDailyBuyPct ?? 5}%</b><small>开启后仍限制为小仓位</small></div>
               <div><span>震荡买入</span><b>{rules.rangeMaxDailyBuys ?? 1} 笔 / {rules.rangeMaxDailyBuyPct ?? 8}%</b><small>维持默认节奏</small></div>
               <div><span>强市买入</span><b>{rules.strongMaxDailyBuys ?? 2} 笔 / {rules.strongMaxDailyBuyPct ?? 15}%</b><small>高分机会可适度放宽</small></div>
+              <div><span>状态门槛</span><b>{rules.weakMinScore ?? 88}/{rules.rangeMinScore ?? 85}/{rules.strongMinScore ?? 82}</b><small>弱市 / 震荡 / 强市</small></div>
+              <div><span>亏损保护</span><b>{rules.maxDailyLossPct ?? 1.5}% / {rules.maxLossStreak ?? 3}日</b><small>达到阈值暂停新增买入</small></div>
               <div><span>每日卖出</span><b>{rules.maxDailySells ?? 5} 笔</b><small>风控优先处理，不被买入挤占</small></div>
               <div><span>买入容忍</span><b>{rules.buyPriceTolerancePct ?? 2}%</b><small>高于观察价过多不追买</small></div>
               <div><span>第一止盈</span><b>{rules.takeProfitSellPct ?? 50}%</b><small>先兑现一部分利润</small></div>
@@ -1469,15 +1482,21 @@ function SimulatorPanel({ onSync, onDailyWorkflow, syncing = false, workflowing 
             </div>
             <div className="rule-explain">
               <b>当前买入条件</b>
-              <p>盘后只生成次日买入计划；次日价格不明显高于观察价、当前没有持仓、还有最大持仓名额、当天动态买入次数和新增仓位未超限，并且现金足够覆盖 100 股和交易费用时才模拟买入。</p>
+              <p>盘后只生成次日买入计划；系统会先按弱市、震荡、强市使用不同评分门槛。弱市默认暂停新增买入，次日价格不明显高于观察价、当前没有持仓、还有最大持仓名额、当天动态买入次数和新增仓位未超限，并且现金足够覆盖 100 股和交易费用时才模拟买入。</p>
               <b>当前卖出条件</b>
               <p>盘后对持仓生成止损、止盈或继续持有计划；止损和调仓卖出全仓处理，第一止盈默认卖出一半，剩余仓位按阶段最高价移动止损。模拟成交会计入佣金、过户费、卖出印花税和滑点。</p>
               <b>调仓与追加</b>
-              <p>满仓时，如果新候选评分足够高，且现有持仓信号变弱、浮亏或持有多日不走强，系统会生成一组“调仓卖出 + 调仓买入”。追加默认关闭，开启后只在已有持仓盈利且评分继续高时小仓位加码。</p>
+              <p>满仓时，如果新候选评分足够高，且现有持仓信号变弱、浮亏或持有多日不走强，系统会生成一组“调仓卖出 + 调仓买入”。追加默认关闭，开启后只在已有持仓盈利且评分继续高时小仓位加码。若单日亏损达到上限，或连续亏损交易日达到保护值，系统只执行风险卖出，不新增买入。</p>
             </div>
             <div className="form-grid simulator-form">
               <label>可用现金<input type="number" value={cash} onChange={(e) => updateCash(e.target.value)} /></label>
               <label>最低评分<input type="number" value={rules.minScore} onChange={(e) => updateRules({ minScore: Number(e.target.value) })} /></label>
+              <label>弱市最低评分<input type="number" value={rules.weakMinScore ?? 88} onChange={(e) => updateRules({ weakMinScore: Number(e.target.value) })} /></label>
+              <label>震荡最低评分<input type="number" value={rules.rangeMinScore ?? 85} onChange={(e) => updateRules({ rangeMinScore: Number(e.target.value) })} /></label>
+              <label>强市最低评分<input type="number" value={rules.strongMinScore ?? 82} onChange={(e) => updateRules({ strongMinScore: Number(e.target.value) })} /></label>
+              <label>日亏损上限%<input type="number" step="0.1" value={rules.maxDailyLossPct ?? 1.5} onChange={(e) => updateRules({ maxDailyLossPct: Number(e.target.value) })} /></label>
+              <label>连续亏损保护<input type="number" value={rules.maxLossStreak ?? 3} onChange={(e) => updateRules({ maxLossStreak: Number(e.target.value) })} /></label>
+              <label className="check-line"><input type="checkbox" checked={rules.allowWeakMarketBuy === true} onChange={(e) => updateRules({ allowWeakMarketBuy: e.target.checked })} />允许弱市高分试探</label>
               <label>最大持仓<input type="number" value={rules.maxPositions} onChange={(e) => updateRules({ maxPositions: Number(e.target.value) })} /></label>
               <label>单票上限%<input type="number" value={rules.maxSinglePct} onChange={(e) => updateRules({ maxSinglePct: Number(e.target.value) })} /></label>
               <label>固定买入上限<input type="number" value={rules.maxDailyBuys ?? 1} onChange={(e) => updateRules({ maxDailyBuys: Number(e.target.value) })} /></label>

@@ -498,6 +498,51 @@ small { display: block; color: var(--subtle); font-size: calc(var(--app-font-siz
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.risk-health-card {
+  position: relative;
+  z-index: 1;
+  margin-top: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border-soft));
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+}
+.risk-health-card.caution {
+  border-color: #f0d59d;
+  background: #fffaf0;
+}
+.risk-health-card.guarded {
+  border-color: #efb1b1;
+  background: #fff5f5;
+}
+.risk-health-heading,
+.risk-health-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.risk-health-heading span {
+  color: var(--muted);
+  font-size: calc(var(--app-font-size) - 1px);
+}
+.risk-health-heading b {
+  color: var(--primary);
+  font-size: calc(var(--app-font-size) - 1px);
+}
+.risk-health-card.guarded .risk-health-heading b { color: #bf3c3c; }
+.risk-health-card p {
+  margin: 5px 0 7px;
+  color: var(--text);
+  font-size: calc(var(--app-font-size) - 1px);
+  -webkit-line-clamp: 1;
+}
+.risk-health-meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: calc(var(--app-font-size) - 2px);
+}
 .compact-head {
   position: relative;
   z-index: 1;

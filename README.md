@@ -26,6 +26,20 @@ cd E:\kai_project\AStockPilot
 - 正式入口：http://127.0.0.1:3009
 - 健康检查：http://127.0.0.1:3009/api/health
 
+## Docker 部署
+
+在项目根目录先完成前端构建，再构建并启动统一镜像：
+
+```powershell
+cd C:\CodeSpeace\AStockPilot\frontend
+npm ci
+npm run build
+cd ..
+docker compose up -d --build
+```
+
+SQLite 数据保存在 `backend/data`，通过 Compose 挂载到容器外；不要把 `backend/.env` 或数据库文件提交到 Git。
+
 进入页面后先点“同步数据”。默认同步 80 只股票近 2 年日线，第一次可能需要几分钟。
 
 ## 自动模拟交易
